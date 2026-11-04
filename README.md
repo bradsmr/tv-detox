@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> **This is a personal fork of [Ansub/tv-detox](https://github.com/Ansub/tv-detox), set up for one TV:** a Hisense 55U8H (Google TV, Android 11, 1.9 GB of RAM) in the Los Angeles TV market. Everything below the [fork notes](#about-this-fork) is the original project's README, updated where this fork behaves differently. Credit for TV Detox goes to [Ansub Khan](https://github.com/Ansub).
+
 <div align="center">
 
 # TV Detox
@@ -38,6 +41,86 @@ Claude Code or Codex does the work. You just press OK on the remote.
 <td width="33%" valign="top"><b>↩️ Undo anytime</b><br>Apps are turned off, never deleted.</td>
 </tr>
 </table>
+
+## About this fork
+
+This fork adds features to the home screen for a Hisense 55U8H. Some of them should work on other Android TVs, but it has only been tested on this one, and some are specific to it: the station list is for Los Angeles, and connecting devices from the Bluetooth menu uses hidden Android calls.
+
+### What's different
+
+| Feature | What it does |
+|---|---|
+| **Live TV tile** | Lists the TV's antenna input, then the stations in [`stations.txt`](stations.txt), with a red dot on the ones live on YouTube. The list opens at once and the dots fill in as each station answers. A live station opens its stream in YouTube; any other opens its channel. |
+| **Inputs tile** | Replaces the separate HDMI tiles with one list, so every input fits. On the U8H that shows the fourth input, which had no room for a tile before. Hold **OK** to rename or hide an input. |
+| **Calendar tile** | Shows the next 7 days from the calendars already synced to the TV. It's read-only, and it needs no Google sign-in of its own. |
+| **Bluetooth menu** | An icon left of the network icon lists paired devices, with a tick on connected ones. Press a device to connect or disconnect it, or pick **Pair new device**. |
+| **Start screensaver** | A new item in the **Settings** tile's menu. |
+| **Scroll fix** | With two rows of apps, the page no longer shifts a few pixels when you press Down on the bottom row. |
+
+### Installing this fork
+
+The releases `install.sh` downloads are the original project's, and they don't have these features. Build this fork first, so `install.sh` uses your build:
+
+```sh
+brew install openjdk@17
+brew install --cask android-commandlinetools
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17 PATH=/opt/homebrew/opt/openjdk@17/bin:$PATH
+sdkmanager "platforms;android-34" "build-tools;34.0.0"
+ANDROID_HOME=/opt/homebrew/share/android-commandlinetools sh build.sh
+sh install.sh <TV_IP> "com.google.android.youtube.tv,com.netflix.ninja"
+```
+
+Your build is signed with your own `key.jks`, which is made on your first build. If the TV has the official release, `install.sh` removes it first, so the home screen's layout resets and the Home button option has to be turned on again. Keep `key.jks` and later builds will update in place.
+
+To change the stations, edit `stations.txt` and build again. Each line is the name shown, then the YouTube handle without the `@`.
+
+### New permissions
+
+This home screen has always worked offline. This fork adds:
+
+- **Internet:** only for the Live TV dots. It loads each station's public YouTube `/live` page when you press the tile, about 400 KB per station, and nothing runs in the background. It needs no account or API key, but it's unofficial, so a change at YouTube could stop the dots working. The stations would still open.
+- **Bluetooth:** to list paired devices, and connect and disconnect them.
+- **Read calendar:** for the Calendar tile. The TV asks once.
+
+<a id="hisense-55u8h-notes"></a>
+### Hisense 55U8H notes
+
+Tested on one TV, connected by Ethernet, on port 5555 with only **USB debugging** turned on. It restarted normally after the cleanup. Measured 9 minutes after a restart, available memory went from about 447 MB to 535 MB and swap in use from 324 MB to 226 MB. That's one reading on each side, and Settings was open during the first one.
+
+**Turned off without trouble:**
+
+| App | Package |
+|---|---|
+| Play Games | `com.google.android.play.games` |
+| Google TV, Play Movies | `com.google.android.videos` |
+| YouTube Music | `com.google.android.youtube.tvmusic` |
+| Google feedback | `com.google.android.feedback` |
+| Partner app auto-installer | `android.autoinstalls.config.google.gtvpai` |
+| Printing | `com.android.printspooler` |
+| HTML viewer | `com.android.htmlviewer` |
+| Sound picker | `com.android.soundpicker` |
+| Phone remote | `com.google.android.tv.remote.service` |
+| Hisense Alexa | `com.hisense.alexa` |
+| TalkBack | `com.google.android.marvin.talkback` |
+
+**Also turned off, with a side effect:** Google Assistant (`com.google.android.tv.assistant`). After that, voice search stopped working, from the remote's button and inside YouTube. Turning it off is the likely cause, but that wasn't confirmed.
+
+**Keep these on:**
+
+- Google TV's home screen and setup app. The setup app and TV Settings also own saved Wi-Fi networks on this TV.
+- `com.mediatek.wwtv.tvcenter`: Live TV, and the screen that shows HDMI.
+- `com.hisense.tv.hitvinput`, `com.vt.tv.input`: the HDMI inputs and the tuner.
+- `com.hisense.fte`: Hisense's first-time setup.
+- The MediaTek hotkey, Netflix button, AirPlay, autopair, network and TV agent services, Hisense smartsense and DLNA, and the HomeKit proxy. Android keeps these running anyway.
+- Hisense's update apps: `com.hisense.tv.ota`, `com.vt.tv.usbota`, `com.hisense.remoteupgrade`.
+
+**The Home button.** Google TV's home screen ranks above any app you install, so setting this home screen as the default isn't enough. To make Home open it, turn on **Home button** in **Settings > Accessibility**, or use the adb commands under [Chromecast with Google TV](#help). Google TV's home screen opens first and this one opens over it, so you may see a brief flash. Hold **Back** to reach Google TV's.
+
+**Pairing a Bluetooth device.** When the **Pair** prompt appears, press **Right**, then **OK**. The prompt opens with the selection on its title, even though Pair looks selected, so **OK** alone does nothing and pairing fails after 30 seconds. The Home button option is the likely reason, but that wasn't confirmed.
+
+**Holding OK.** The remote's Menu key opens Hisense's own picture menu, so use a long press of **OK** for the home screen's menus.
+
+**Not tested yet:** the Antenna row with a real antenna, and whether settings of 5 minutes for the screensaver and 15 for sleep behave as expected in everyday use.
 
 ## Watch it work
 
@@ -494,7 +577,7 @@ Yes. You only need `adb`. On a Mac, run `brew install android-platform-tools`. O
 ```sh
 sh install.sh <TV_IP>                                               # picks your TV apps for you
 sh install.sh <TV_IP> "com.netflix.ninja,com.hulu.livingroomplus"   # or choose them
-sh install.sh <TV_IP> "" "bluetooth,sound,picture"    # add settings shortcuts
+sh install.sh <TV_IP> "" "sound,picture"    # add settings shortcuts
 ```
 
 Most TVs keep opening their own home screen, so the script offers to turn that off. Nothing is uninstalled.
@@ -517,7 +600,7 @@ Use the remote. Hold **OK** on an app (or press **Menu**) to:
 
 To add an app, pick the **Add app** tile in the bottom row. Add as many apps as you like: they wrap into rows of six, and the page scrolls once there are more than twelve. Your changes are kept until you run `install.sh` with a new app list.
 
-HDMI tiles work the same way. Hold **OK** on one to **Rename** it — TV, PlayStation, Xbox, Switch, Laptop, PC, Blu-ray, Soundbar — or choose **Type a name…** to enter your own with the TV’s keyboard. You can also **Remove** it from the home screen. A removed input comes back by holding **OK** on the **Add app** tile. This only changes this home screen; the TV's own input names stay as they are.
+Inputs work much the same way. Hold **OK** on the **Inputs** tile and pick an input to **Rename** it — TV, PlayStation, Xbox, Switch, Laptop, PC, Blu-ray, Soundbar — or choose **Type a name…** to enter your own with the TV’s keyboard. You can also **Remove** it from the list. A removed input comes back by holding **OK** on the **Add app** tile. This only changes this home screen; the TV's own input names stay as they are.
 
 </details>
 
@@ -525,7 +608,7 @@ HDMI tiles work the same way. Hold **OK** on one to **Rename** it — TV, PlaySt
 <summary><b>Can I change the background?</b></summary>
 <br>
 
-Yes. Pick the **Settings** tile, then **Wallpaper**. (**TV settings**, right under it, opens the TV's own settings.) There are fourteen gradients. Dark: Dusk (the default), Midnight, Plum, Forest, Graphite, Ocean and Ember. Bright: Sunset, Lagoon, Aurora, Coral, Iris, Meadow and Gold. The background changes as you move through the list; press **OK** to keep one, or **Back** to leave it as it was. They're colours only, no pictures, so every one is just as fast and uses the same memory.
+Yes. Pick the **Settings** tile, then **Wallpaper**. (**TV settings**, at the bottom of that menu, opens the TV's own settings.) There are fourteen gradients. Dark: Dusk (the default), Midnight, Plum, Forest, Graphite, Ocean and Ember. Bright: Sunset, Lagoon, Aurora, Coral, Iris, Meadow and Gold. The background changes as you move through the list; press **OK** to keep one, or **Back** to leave it as it was. They're colours only, no pictures, so every one is just as fast and uses the same memory.
 
 </details>
 
@@ -533,10 +616,10 @@ Yes. Pick the **Settings** tile, then **Wallpaper**. (**TV settings**, right und
 <summary><b>Can I get Wi-Fi and Bluetooth one press away?</b></summary>
 <br>
 
-Yes. A small network icon always sits next to the clock. It shows **Wi-Fi** (with signal bars), **Ethernet** or a crossed-out Wi-Fi when you're offline, and opens your network settings. **Bluetooth**, **Sound** and **Picture** shortcuts can join it. They're off unless you ask for them:
+Yes. A small network icon always sits on the same row as the clock, with the Bluetooth menu next to it. The network icon shows **Wi-Fi** (with signal bars), **Ethernet** or a crossed-out Wi-Fi when you're offline, and opens your network settings. **Sound** and **Picture** shortcuts can join them. They're off unless you ask for them:
 
 ```sh
-sh install.sh <TV_IP> "" "bluetooth,sound,picture"   # pick any of them, in any order
+sh install.sh <TV_IP> "" "sound,picture"   # pick either, in any order
 sh install.sh <TV_IP> "" "none"                                    # take them away
 ```
 
@@ -596,7 +679,7 @@ If the laptop never connects, use the TV's recovery mode or a factory reset. How
    ```
 3. `sh build.sh`, then `sh install.sh <TV_IP>` installs your build instead of the release.
 4. `sh ci/smoke-test.sh <TV_IP or emulator>` checks it all works.
-5. `CLOCK=24 sh install.sh <TV_IP>` sets a 24-hour clock (or `CLOCK=12` for a 12-hour one, `CLOCK=auto` to follow the TV again). On the TV, holding OK on an HDMI tile renames or removes that input.
+5. `CLOCK=24 sh install.sh <TV_IP>` sets a 24-hour clock (or `CLOCK=12` for a 12-hour one, `CLOCK=auto` to follow the TV again). On the TV, holding OK on the Inputs tile lets you rename or remove an input.
 6. Testing the input tiles on an emulator, which has no HDMI ports: `FAKE_INPUT=1 sh install.sh <emulator>`. That builds and installs `ci/fake-input` (a TV input service with no hardware behind it) and tells the home screen to show it. `undo.sh` removes it again. It is for emulators only.
 
 HDMI inputs are found on their own. The labels follow the TV's language, with 16 languages built in. To add yours or fix a translation, edit `src/com/ansub/tvhome/Strings.java`. Keep `key.jks`, which is made on your first build: updates must be signed with the same key.
