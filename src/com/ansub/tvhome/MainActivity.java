@@ -126,10 +126,13 @@ public class MainActivity extends Activity {
     private static final int ICON_TOP = 76, ICON_BUTTON = 72, ICON_SIZE = 40, ICON_GAP = 12; // level with the date
 
     // The Settings tile opens a small menu: the home screen's own settings, then the TV's.
-    private static final String[] SETTINGS_ITEMS = {"Wallpaper", "Brightness", "TV settings"};
+    private static final String[] SETTINGS_ITEMS = {"Wallpaper", "Brightness", "Start screensaver", "TV settings"};
     // Android TV 11 and later (Google TV too) has no Display page, but its "Display & Sound" page holds Picture.
     private static final String[] TV_DISPLAY_SOUND = {"com.android.tv.settings",
             "com.android.tv.settings.device.displaysound.DisplaySoundActivity"};
+    // System UI's screen that starts the screensaver set in the TV's settings, then closes itself.
+    // Android has no public call for this, so the menu item is left out on TVs without this screen.
+    private static final String[] START_SCREENSAVER = {"com.android.systemui", "com.android.systemui.Somnambulator"};
     // Wallpapers, saved by name: a gradient top to bottom, then a glow from the top left and one from
     // the bottom right. Dark ones first, then bright ones that get darker towards the bottom, so the
     // white labels stay easy to read. Only colours, no images, so every one costs the same as Dusk,
@@ -779,10 +782,14 @@ public class MainActivity extends Activity {
             // Shield, Brightness also fell back to a Display & Sound page that's listed but missing there.
             List<String> list = new ArrayList<>(Arrays.asList(SETTINGS_ITEMS));
             if (isBox(this)) list.remove("Brightness");
+            final Intent screensaver = new Intent(Intent.ACTION_MAIN)
+                    .setClassName(START_SCREENSAVER[0], START_SCREENSAVER[1]);
+            if (screensaver.resolveActivity(getPackageManager()) == null) list.remove("Start screensaver");
             final String[] items = list.toArray(new String[0]);
             dropdown(tile(SETTINGS), items, which -> {
                 if ("Wallpaper".equals(items[which])) showWallpapers();
                 else if ("Brightness".equals(items[which])) openBrightness();
+                else if ("Start screensaver".equals(items[which])) startScreensaver(screensaver);
                 else openTvSettings();
             });
             return;
@@ -959,6 +966,11 @@ public class MainActivity extends Activity {
 
     private void openTvSettings() {
         try { startActivity(new Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); }
+        catch (Exception ignored) {}
+    }
+
+    private void startScreensaver(Intent i) {
+        try { startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); }
         catch (Exception ignored) {}
     }
 
