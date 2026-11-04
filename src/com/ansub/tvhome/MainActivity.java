@@ -549,7 +549,10 @@ public class MainActivity extends Activity {
         gridTop = Math.max(px(GRID_MIN_TOP), px(ROW1_TOP) - (rows - 1) * px(ROW_STEP));
         int bottomTop = gridTop + rows * px(ROW_STEP);
         ((FrameLayout.LayoutParams) moveHint.getLayoutParams()).topMargin = gridTop - px(64);
-        root.setMinimumHeight(bottomTop + h + px(MARGIN));
+        // The margin under the bottom row only counts once the page scrolls. Two rows of apps fill the
+        // screen a few pixels short of it, and that mustn't make the page scroll.
+        boolean fits = bottomTop + h <= getResources().getDisplayMetrics().heightPixels;
+        root.setMinimumHeight(bottomTop + h + (fits ? 0 : px(MARGIN)));
 
         for (String pkg : apps) {
             Intent li = launchIntent(pm, pkg);
