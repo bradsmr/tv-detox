@@ -1,0 +1,8 @@
+# Stations in the Live TV tile, top to bottom: the name shown, then the YouTube handle (without the @).
+PBS NewsHour|PBSNewsHour
+PBS KIDS|pbskids
+2 CBS / 9 KCAL|CBSLA
+4 NBC|NBCLA
+5 KTLA|KTLA
+7 ABC|ABC7
+11 FOX|FOXLA

@@ -23,6 +23,14 @@ rm -rf out; mkdir -p out/classes out/dex out/gen/com/ansub/tvhome
   echo "}; }"
 } > out/gen/com/ansub/tvhome/Apps.java
 
+# Turn the station list into Stations.java.
+{
+  echo "package com.ansub.tvhome;"
+  echo "final class Stations { static final String[][] LIST = {"
+  grep -v '^[[:space:]]*#' "${STATIONS:-stations.txt}" | tr -d '\r' | grep -v '^$' | sed 's/\(.*\)|\(.*\)/    {"\1", "\2"},/'
+  echo "}; }"
+} > out/gen/com/ansub/tvhome/Stations.java
+
 "$BT/aapt2" compile --dir res -o out/res.zip
 "$BT/aapt2" link -o out/base.apk -I "$JAR" --manifest AndroidManifest.xml --min-sdk-version 21 --target-sdk-version 34 out/res.zip
 # shellcheck disable=SC2046 # javac and d8 want one argument per file, so the list is split on purpose

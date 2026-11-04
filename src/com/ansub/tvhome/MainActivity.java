@@ -6,7 +6,12 @@ import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothClass;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothProfile;
 import android.content.BroadcastReceiver;
+import android.content.ContentUris;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -14,6 +19,7 @@ import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -33,6 +39,7 @@ import android.net.NetworkRequest;
 import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
+import android.provider.CalendarContract;
 import android.provider.Settings;
 import android.text.InputFilter;
 import android.text.InputType;
@@ -101,7 +108,19 @@ public class MainActivity extends Activity {
     private static final String[] QUICK_LABELS = {"Bluetooth", "Sound", "Picture"};
     private static final int[][] QUICK_ICONS = {LineIcon.BLUETOOTH, LineIcon.SOUND, LineIcon.PICTURE};
     private static final String NETWORK = "network";
+    private static final String INPUTS = "inputs";
+    private static final String LIVE = "live";
+    private static final String YOUTUBE_TV = "com.google.android.youtube.tv";
+    private static final int LIVE_TIMEOUT_MS = 5000, LIVE_DOT = 20;
+    // YouTube serves its full page, with the live details, to a desktop browser.
+    private static final String DESKTOP_BROWSER =
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
+    private static final String CALENDAR = "calendar";
+    private static final int CALENDAR_DAYS = 7;
     private static final int OFFLINE = 0, ETHERNET = 4; // network states; 1 to 3 are Wi-Fi bars
+    private static final String BLUETOOTH = "bluetooth";
+    private static final int HID_HOST_PROFILE = 4; // BluetoothProfile.HID_HOST, which is hidden
+    private static final int GAME_CONTROLLERS = 0x0504, GAMEPAD = 0x0508; // BluetoothClass values for controllers
 
     // Saved on the TV: custom input names ("id=name" per line), hidden inputs (one id per line),
     // and the clock override ("12" or "24"; absent follows the TV).
@@ -164,6 +183,7 @@ public class MainActivity extends Activity {
     private final List<View> tiles = new ArrayList<>();
     private final Map<View, ValueAnimator> lifts = new WeakHashMap<>(); // a running focus fade per tile
     private boolean dirty = true;
+    private final String[] liveVideos = new String[Stations.LIST.length]; // from the last check; null if not live
     private java.util.Locale shownLocale; // the TV's language (and region) when the page was built
     private String focusedKey;
     private final List<String> rowApps = new ArrayList<>(); // the top row as shown, in order
@@ -549,28 +569,35 @@ public class MainActivity extends Activity {
             addTile(root, pkg, label, banner, null, icon, gridX(i), gridY(i), w, h);
         }
 
-        // Bottom row: Play Store, HDMI inputs, Settings and Add app, six at most.
+        // Bottom row: Play Store, the inputs menu, Live TV, Calendar, Settings and Add app.
         int col = 0;
         boolean store = !apps.contains(PLAY_STORE) && launchIntent(pm, PLAY_STORE) != null;
-        List<TvInputInfo> inputs = hdmiInputs();
-        int room = PER_ROW - 2 - (store ? 1 : 0);
-        if (inputs.size() > room) inputs = inputs.subList(0, room);
         if (store)
             addTile(root, PLAY_STORE, "Play Store", null, LineIcon.PLAY, null, m + col++ * (w + g), bottomTop, w, h);
-        for (TvInputInfo in : inputs)
-            addTile(root, in.getId(), inputLabel(in), null, LineIcon.HDMI, null, m + col++ * (w + g), bottomTop, w, h);
+        if (!hdmiInputs().isEmpty())
+            addTile(root, INPUTS, Strings.t("Inputs"), null, LineIcon.HDMI, null, m + col++ * (w + g), bottomTop, w, h);
+        addTile(root, LIVE, Strings.t("Live TV"), null, LineIcon.LIVE, null, m + col++ * (w + g), bottomTop, w, h);
+        addTile(root, CALENDAR, Strings.t("Calendar"), null, LineIcon.CALENDAR, null, m + col++ * (w + g), bottomTop, w, h);
         addTile(root, SETTINGS, Strings.t("Settings"), null, LineIcon.SETTINGS, null, m + col++ * (w + g), bottomTop, w, h);
         addTile(root, ADD, Strings.t("Add app"), null, LineIcon.PLUS, null, m + col * (w + g), bottomTop, w, h);
 
         // Plain icons at the top right, level with the date: any settings shortcuts picked, then the
         // network icon. Added last, so the first app keeps first focus; Up from the apps reaches them.
         List<Integer> quick = quickList();
+        // The Bluetooth menu takes the place of the Bluetooth shortcut.
+        boolean bluetooth = BluetoothAdapter.getDefaultAdapter() != null;
+        if (bluetooth) quick.remove(Integer.valueOf(Arrays.asList(QUICK_NAMES).indexOf(BLUETOOTH)));
+        int icons = quick.size() + (bluetooth ? 2 : 1);
         int ib = px(ICON_BUTTON), ig = px(ICON_GAP);
         // The last icon's right edge lines up with the apps' (its focus circle sticks out past them).
         int qx = getResources().getDisplayMetrics().widthPixels - m + (ib - px(ICON_SIZE)) / 2
-                - (quick.size() + 1) * ib - quick.size() * ig;
+                - icons * ib - (icons - 1) * ig;
         for (int q : quick) {
             addIcon(QUICK + QUICK_NAMES[q], Strings.t(QUICK_LABELS[q]), new LineIcon(QUICK_ICONS[q]), qx);
+            qx += ib + ig;
+        }
+        if (bluetooth) {
+            addIcon(BLUETOOTH, Strings.t("Bluetooth"), new LineIcon(LineIcon.BLUETOOTH), qx);
             qx += ib + ig;
         }
         netIcon = addIcon(NETWORK, Strings.t("Network"), null, qx);
@@ -652,10 +679,10 @@ public class MainActivity extends Activity {
         final boolean editable = rowApps.contains(key);
         card.setOnClickListener(v -> open(key));
         if (editable) card.setOnLongClickListener(v -> { showEditMenu(key); return true; });
-        // What a long OK (or Menu) on this tile opens: the app row's menu, an input's menu, or, on
-        // the + tile, the inputs taken off the home screen.
+        // What a long OK (or Menu) on this tile opens: the app row's menu, the list of inputs to rename
+        // or hide, or, on the + tile, the inputs taken off the home screen.
         final Runnable menu = editable ? () -> showEditMenu(key)
-                : isInput(key) ? () -> showInputMenu(key)
+                : INPUTS.equals(key) ? () -> showInputs(this::showInputMenu)
                 : ADD.equals(key) && !hiddenInputs().isEmpty() ? this::showHiddenInputs : null;
         card.setOnKeyListener((v, code, ev) -> {
             boolean ok = code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER
@@ -793,11 +820,20 @@ public class MainActivity extends Activity {
                 else openTvSettings();
             });
             return;
-        } else if (isInput(key)) {
-            openInput(key);
+        } else if (INPUTS.equals(key)) {
+            showInputs(this::openInput);
+            return;
+        } else if (LIVE.equals(key)) {
+            showLive();
+            return;
+        } else if (CALENDAR.equals(key)) {
+            showCalendar();
             return;
         } else if (NETWORK.equals(key)) {
             openNetworkSettings();
+            return;
+        } else if (BLUETOOTH.equals(key)) {
+            showBluetooth();
             return;
         } else if (key.startsWith(QUICK)) {
             openQuick(key.substring(QUICK.length()));
@@ -974,6 +1010,186 @@ public class MainActivity extends Activity {
         catch (Exception ignored) {}
     }
 
+    // A channel's /live address serves the watch page of its current stream, if it has one. This reads
+    // YouTube's public page, so it needs no account or key. Null if the station isn't live or the check
+    // failed; either way the station stays in the list.
+    private static String liveVideo(String handle) {
+        java.net.HttpURLConnection c = null;
+        try {
+            c = (java.net.HttpURLConnection) new java.net.URL("https://www.youtube.com/@" + handle + "/live").openConnection();
+            c.setConnectTimeout(LIVE_TIMEOUT_MS);
+            c.setReadTimeout(LIVE_TIMEOUT_MS);
+            c.setRequestProperty("User-Agent", DESKTOP_BROWSER);
+            c.setRequestProperty("Accept-Language", "en-US");
+            StringBuilder page = new StringBuilder();
+            try (java.io.Reader in = new java.io.InputStreamReader(c.getInputStream(), "UTF-8")) {
+                char[] buffer = new char[16384];
+                for (int n; (n = in.read(buffer)) > 0; ) page.append(buffer, 0, n);
+            }
+            if (page.indexOf("\"isLiveNow\":true") < 0) return null;
+            String marker = "<link rel=\"canonical\" href=\"https://www.youtube.com/watch?v=";
+            int start = page.indexOf(marker);
+            if (start < 0) return null;
+            start += marker.length();
+            return page.substring(start, page.indexOf("\"", start));
+        } catch (Exception e) {
+            return null;
+        } finally {
+            if (c != null) c.disconnect();
+        }
+    }
+
+    // The Live TV list: the TV's tuner, if it has one, then the stations, with a red dot on the live
+    // ones. It opens at once with the dots from the last check, and each dot updates as its station
+    // answers. The panel draws these same drawables, so changing a colour redraws its row.
+    private void showLive() {
+        final TvInputInfo tuner = tunerInput();
+        final int first = tuner == null ? 0 : 1;
+        List<String> labels = new ArrayList<>();
+        if (tuner != null) labels.add(Strings.t("Antenna"));
+        for (String[] station : Stations.LIST) labels.add(station[0]);
+        final GradientDrawable[] dots = new GradientDrawable[labels.size()];
+        for (int i = 0; i < dots.length; i++) {
+            dots[i] = new GradientDrawable();
+            dots[i].setShape(GradientDrawable.OVAL);
+            dots[i].setColor(i >= first ? dotColor(liveVideos[i - first]) : Color.TRANSPARENT);
+        }
+        panel(Strings.t("Live TV"), labels, pos -> dots[pos], px(LIVE_DOT), -1, null, which -> {
+            if (which < first) {
+                openInput(tuner.getId());
+                return;
+            }
+            String video = liveVideos[which - first];
+            openYouTube(video != null ? "https://www.youtube.com/watch?v=" + video
+                    : "https://www.youtube.com/@" + Stations.LIST[which - first][1]);
+        });
+        for (int i = 0; i < Stations.LIST.length; i++) {
+            final int station = i;
+            new Thread(() -> {
+                final String video = liveVideo(Stations.LIST[station][1]);
+                runOnUiThread(() -> {
+                    liveVideos[station] = video;
+                    dots[station + first].setColor(dotColor(video));
+                });
+            }).start();
+        }
+    }
+
+    private static int dotColor(String video) {
+        return video != null ? 0xFFE53935 : Color.TRANSPARENT;
+    }
+
+    private TvInputInfo tunerInput() {
+        TvInputManager tim = (TvInputManager) getSystemService(Context.TV_INPUT_SERVICE);
+        if (tim == null) return null;
+        // Streaming apps can register as tuners too, so this looks for the hardware one by name.
+        for (TvInputInfo in : tim.getTvInputList())
+            if (in.getType() == TvInputInfo.TYPE_TUNER && in.getId().toLowerCase(java.util.Locale.ROOT).contains("tuner")) return in;
+        return null;
+    }
+
+    private void openYouTube(String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)).setPackage(YOUTUBE_TV)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        } catch (Exception ignored) {}
+    }
+
+    // The Calendar tile's list: the next few days from the calendars the TV already syncs. Android
+    // asks for permission first; pressing the tile again opens the list.
+    private void showCalendar() {
+        if (android.os.Build.VERSION.SDK_INT >= 23
+                && checkSelfPermission(android.Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[] {android.Manifest.permission.READ_CALENDAR}, 0);
+            return;
+        }
+        List<String> rows = upcomingEvents();
+        if (rows.isEmpty()) rows.add(Strings.t("No events this week"));
+        panel(Strings.t("Calendar"), rows, which -> {});
+    }
+
+    // One row per event: its day, its time, its title. Repeating events come back once per day.
+    private List<String> upcomingEvents() {
+        List<String> rows = new ArrayList<>();
+        long now = System.currentTimeMillis();
+        Uri.Builder uri = CalendarContract.Instances.CONTENT_URI.buildUpon();
+        ContentUris.appendId(uri, now);
+        ContentUris.appendId(uri, now + CALENDAR_DAYS * 24 * 60 * 60 * 1000L);
+        String[] columns = {CalendarContract.Instances.TITLE, CalendarContract.Instances.BEGIN,
+                CalendarContract.Instances.ALL_DAY};
+        java.text.DateFormat day = new java.text.SimpleDateFormat("EEE d", java.util.Locale.getDefault());
+        // All-day events are stored as midnight UTC, whatever the TV's time zone.
+        java.text.DateFormat allDay = new java.text.SimpleDateFormat("EEE d", java.util.Locale.getDefault());
+        allDay.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+        java.text.DateFormat time = android.text.format.DateFormat.getTimeFormat(this);
+        try (Cursor c = getContentResolver().query(uri.build(), columns, CalendarContract.Instances.VISIBLE + "=1",
+                null, CalendarContract.Instances.BEGIN)) {
+            while (c != null && c.moveToNext()) {
+                java.util.Date begin = new java.util.Date(c.getLong(1));
+                rows.add((c.getInt(2) == 1 ? allDay.format(begin) + "  " + Strings.t("All day")
+                        : day.format(begin) + "  " + time.format(begin)) + "  " + c.getString(0));
+            }
+        } catch (Exception ignored) {}
+        return rows;
+    }
+
+    // The Bluetooth icon's menu: paired devices, with a tick on connected ones, then the TV's pairing
+    // screen. Android 12 and later ask for permission first; pressing the icon again opens the menu.
+    private void showBluetooth() {
+        if (android.os.Build.VERSION.SDK_INT >= 31
+                && checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[] {android.Manifest.permission.BLUETOOTH_CONNECT}, 0);
+            return;
+        }
+        final List<BluetoothDevice> devices = new ArrayList<>();
+        List<String> names = new ArrayList<>();
+        for (BluetoothDevice d : BluetoothAdapter.getDefaultAdapter().getBondedDevices()) {
+            if (isRemote(d)) continue;
+            devices.add(d);
+            names.add((isConnected(d) ? "✓  " : "") + d.getName());
+        }
+        names.add("Pair new device");
+        dropdown(tile(BLUETOOTH), names.toArray(new String[0]), which -> {
+            if (which < devices.size()) toggleBluetooth(devices.get(which));
+            else openQuick(BLUETOOTH);
+        });
+    }
+
+    // TV remotes pair over Bluetooth LE. LE game controllers stay in the list.
+    private static boolean isRemote(BluetoothDevice d) {
+        BluetoothClass c = d.getBluetoothClass();
+        int type = c == null ? 0 : c.getDeviceClass();
+        return d.getType() == BluetoothDevice.DEVICE_TYPE_LE && type != GAME_CONTROLLERS && type != GAMEPAD;
+    }
+
+    private static boolean isConnected(BluetoothDevice d) {
+        try { return (Boolean) d.getClass().getMethod("isConnected").invoke(d); }
+        catch (Exception e) { return false; }
+    }
+
+    // Android has no public call to connect a paired device, so this calls the profile's hidden
+    // connect or disconnect. If the TV blocks that, its own Bluetooth screen opens instead.
+    private void toggleBluetooth(final BluetoothDevice d) {
+        BluetoothClass c = d.getBluetoothClass();
+        boolean audio = c != null && c.getMajorDeviceClass() == BluetoothClass.Device.Major.AUDIO_VIDEO;
+        final String call = isConnected(d) ? "disconnect" : "connect";
+        final BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+        boolean asked = adapter.getProfileProxy(this, new BluetoothProfile.ServiceListener() {
+            @Override
+            public void onServiceConnected(int profile, BluetoothProfile proxy) {
+                boolean ok = false;
+                try { ok = (Boolean) proxy.getClass().getMethod(call, BluetoothDevice.class).invoke(proxy, d); }
+                catch (Exception ignored) {}
+                adapter.closeProfileProxy(profile, proxy);
+                if (!ok) openQuick(BLUETOOTH);
+            }
+
+            @Override
+            public void onServiceDisconnected(int profile) {}
+        }, audio ? BluetoothProfile.A2DP : HID_HOST_PROFILE);
+        if (!asked) openQuick(BLUETOOTH);
+    }
+
     interface Pick { void at(int which); }
     interface Icon { Drawable at(int which) throws Exception; }
 
@@ -1110,7 +1326,8 @@ public class MainActivity extends Activity {
         win.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
         win.setGravity(Gravity.TOP | Gravity.START);
         android.view.WindowManager.LayoutParams lp = win.getAttributes();
-        lp.x = at[0];
+        // Keeps menus from icons at the far right on screen, in line with the tiles below.
+        lp.x = Math.min(at[0], getResources().getDisplayMetrics().widthPixels - px(MARGIN) - w);
         lp.y = y;
         lp.width = w;
         lp.height = h;
@@ -1144,12 +1361,20 @@ public class MainActivity extends Activity {
         });
     }
 
-    // Hold OK on an HDMI tile: name it after the box plugged into it, or take it off the home
-    // screen. Hiding keeps the input in the TV's list, so nothing about the TV changes.
+    interface InputPick { void at(String id); }
+
+    // The Inputs tile's list: pressing it opens the input picked, holding it edits the input picked.
+    private void showInputs(final InputPick pick) {
+        final List<TvInputInfo> inputs = hdmiInputs();
+        String[] labels = new String[inputs.size()];
+        for (int i = 0; i < labels.length; i++) labels[i] = inputLabel(inputs.get(i));
+        dropdown(tile(INPUTS), labels, which -> pick.at(inputs.get(which).getId()));
+    }
+
+    // Name an input after the box plugged into it, or take it off the home screen. Hiding keeps the
+    // input in the TV's list, so nothing about the TV changes.
     private void showInputMenu(final String id) {
-        View anchor = tile(id);
-        if (anchor == null) return;
-        dropdown(anchor, new String[] {"Rename", "Remove from home"}, which -> {
+        dropdown(tile(INPUTS), new String[] {"Rename", "Remove from home"}, which -> {
             if (which == 0) showInputNames(id);
             else hideInput(id);
         });
@@ -1174,7 +1399,7 @@ public class MainActivity extends Activity {
                 return;
             }
             setInputName(id, which == 0 ? null : names.get(which));
-            focusedKey = id;
+            focusedKey = INPUTS;
             buildTiles();
         });
     }
@@ -1203,7 +1428,7 @@ public class MainActivity extends Activity {
         Runnable save = () -> {
             setInputName(id, name.getText().toString());
             dialog.dismiss();
-            focusedKey = id;
+            focusedKey = INPUTS;
             buildTiles();
         };
         name.setOnEditorActionListener((v, action, event) -> {
@@ -1260,7 +1485,7 @@ public class MainActivity extends Activity {
             Set<String> now = hiddenInputs();
             now.remove(ids.get(which));
             saveHiddenInputs(now);
-            focusedKey = ids.get(which);
+            focusedKey = INPUTS;
             buildTiles();
         });
     }
@@ -1410,10 +1635,6 @@ public class MainActivity extends Activity {
             return true;
         }
         return true; // up/down and everything else stay put while moving
-    }
-
-    private static boolean isInput(String key) {
-        return key.indexOf('/') > 0;
     }
 
     // The TV's own HDMI inputs (not devices behind them), in order, skipping the ones taken off

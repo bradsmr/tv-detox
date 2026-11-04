@@ -5,6 +5,14 @@
     <!-- Only for the network tile: Wi-Fi, Ethernet or offline, and the Wi-Fi signal. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Only for the Bluetooth menu: list paired devices and connect or disconnect them. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- Only for the Live TV tile: checks which stations are live on YouTube when the tile is pressed. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Only for the Calendar tile: read the events the TV already syncs. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
     <!-- Android 11+ only shows apps a home screen asks to see: TV apps and normal apps. -->
     <queries>
         <intent>
@@ -24,6 +32,8 @@
         <package android:name="com.tcl.settings" />
         <!-- Some TCL Google TVs ship TCL's Picture and Sound panels inside TvSettings. -->
         <package android:name="com.android.tv.settings" />
+        <!-- Android's calendar storage, which the Calendar tile reads. -->
+        <provider android:authorities="com.android.calendar" />
         <!-- System UI, for the screen that starts the screensaver from the Settings menu. -->
         <package android:name="com.android.systemui" />
         <!-- Google TV's HDMI input player, so HDMI tiles can see when the TV sends HDMI to it. -->
